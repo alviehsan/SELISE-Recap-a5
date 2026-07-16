@@ -146,11 +146,13 @@ jobs:
               security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$KEYCHAIN" || true
               ;;
             *)
-              # TODO(rebrand): §5f — this CN matches the certificate baked into the
-              # APPLE_CERTIFICATE secret (a pre-generated .p12), NOT anything generated
-              # per-run. Do NOT rename this string alone — it must equal the cert's real
-              # Common Name or `find-certificate -c` returns nothing and the build aborts.
-              security find-certificate -c "MeetRec Self-Signed (SELISE)" -p "$KEYCHAIN" > "$RUNNER_TEMP/cert.pem"
+              # This CN matches the certificate baked into the APPLE_CERTIFICATE
+              # secret (a pre-generated .p12), NOT anything generated per-run. Do NOT
+              # rename this string alone — it must equal the cert's real Common Name
+              # or `find-certificate -c` returns nothing and the build aborts.
+              # (Cert regenerated 2026-07-16 with this CN — the old
+              # "MeetRec Self-Signed (SELISE)" cert was lost; §5f rebrand done here.)
+              security find-certificate -c "SELISE Recap a5 Self-Signed" -p "$KEYCHAIN" > "$RUNNER_TEMP/cert.pem"
               sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem"
               ;;
           esac
