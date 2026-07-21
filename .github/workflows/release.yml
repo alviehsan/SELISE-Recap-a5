@@ -200,6 +200,12 @@ jobs:
           # ── Tauri auto-updater signature ──
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # ── Calendar linking: PUBLIC OAuth client IDs, inlined into the bundle
+          #    by Vite at build time. Google's confidential client secret is NOT
+          #    here — the token exchange is proxied through the Worker, which
+          #    holds the secret. (Empty secret = calendar buttons stay disabled.)
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_MS_CLIENT_ID: ${{ secrets.VITE_MS_CLIENT_ID }}
         with:
           args: ${{ matrix.args }}
           tagName: ${{ env.RELEASE_TAG }}
