@@ -47,14 +47,16 @@ jobs:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc      # primary: ~95% of users
             args: '--target x86_64-pc-windows-msvc'
-          - platform: windows-latest
-            target: aarch64-pc-windows-msvc     # Surface / Snapdragon ARM
-            args: '--target aarch64-pc-windows-msvc'
+          # NOTE: aarch64-pc-windows-msvc (Windows-on-ARM: Surface / Snapdragon)
+          # is intentionally NOT built. The local-ASR dependency sherpa-onnx-sys
+          # ships no prebuilt libs for that target — its build.rs panics
+          # "Unsupported target for sherpa-onnx prebuilt libs: os=windows,
+          # arch=aarch64" — so the job failed every release (was masked by
+          # continue-on-error). Windows/ARM is niche and can't run local speech
+          # features anyway; dropped 2026-07-23. Revisit if sherpa-onnx adds
+          # win-arm64 prebuilts (or we vendor a source build).
 
     runs-on: ${{ matrix.platform }}
-    # ARM64 Windows is best-effort (whisper.cpp x64→ARM64 cross-compile is
-    # unresolved); don't let it fail the release of the x64 + macOS installers.
-    continue-on-error: ${{ matrix.target == 'aarch64-pc-windows-msvc' }}
     steps:
       # Check out the PRIVATE source repo's tagged commit — NOT this repo.
       # SOURCE_REPO_PAT is scoped to contents:read on that one repo only.
@@ -90,32 +92,6 @@ jobs:
       - name: Build macOS native sidecars
         if: matrix.platform == 'macos-latest'
         run: npm run native:release
-
-      # whisper.cpp (whisper-rs) builds via CMake. windows-latest ships CMake, so
-      # x64 is fine; ARM64 cross-compile needs clang-cl + Ninja because ggml
-      # refuses MSVC on ARM. (Mirrors the same step in ci.yml.)
-      - name: Set up clang toolchain for ARM64 whisper.cpp build
-        if: matrix.target == 'aarch64-pc-windows-msvc'
-        shell: pwsh
-        run: |
-          # Built from a PowerShell array — a here-string at col 0 breaks the YAML,
-          # and an indented closing '@ breaks PowerShell. The array avoids both.
-          $lines = @(
-            'set(CMAKE_SYSTEM_NAME Windows)',
-            'set(CMAKE_SYSTEM_PROCESSOR ARM64)',
-            'set(CMAKE_C_COMPILER clang-cl)',
-            'set(CMAKE_CXX_COMPILER clang-cl)',
-            'set(CMAKE_C_FLAGS_INIT "--target=aarch64-pc-windows-msvc")',
-            'set(CMAKE_CXX_FLAGS_INIT "--target=aarch64-pc-windows-msvc")',
-            'set(CMAKE_EXE_LINKER_FLAGS_INIT "/machine:ARM64")',
-            'set(CMAKE_SHARED_LINKER_FLAGS_INIT "/machine:ARM64")',
-            'set(CMAKE_C_COMPILER_WORKS 1 CACHE BOOL "skip")',
-            'set(CMAKE_CXX_COMPILER_WORKS 1 CACHE BOOL "skip")'
-          )
-          Set-Content -Path "$env:RUNNER_TEMP\aarch64-clang.cmake" -Value $lines -Encoding ascii
-          echo "CMAKE_TOOLCHAIN_FILE=$env:RUNNER_TEMP\aarch64-clang.cmake" >> $env:GITHUB_ENV
-          echo "CMAKE_GENERATOR=Ninja" >> $env:GITHUB_ENV
-          echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
 
       # ── macOS code signing (SELF-SIGNED, for STABLE TCC + Keychain across
       #    auto-updates). See the source repo's release.yml history for the
@@ -213,6 +189,36 @@ jobs:
           releaseBody: 'See the assets below to download and install.'
           releaseDraft: false
           prerelease: false
+
+      # ── Notarize + staple the DMG wrapper ─────────────────────────────────
+      # tauri-bundler notarizes and staples the .app, but NOT the outer .dmg
+      # that users actually download and double-click. Without a ticket on the
+      # DMG itself, a quarantined download trips "Apple cannot check it for
+      # malicious software" on open (spctl -a -t open → rejected/Unnotarized).
+      # Submit the DMG to the notary service and staple the ticket so the disk
+      # image passes Gatekeeper offline too. Runs only when Developer ID
+      # notarization is active — APPLE_ID is exported to $GITHUB_ENV by the gate
+      # step above ONLY when all three secrets are present, so self-signed
+      # builds skip this (empty env.APPLE_ID). Re-uploads over tauri-action's
+      # already-published (un-stapled) DMG via --clobber.
+      - name: Notarize & staple the macOS DMG
+        if: runner.os == 'macOS' && env.APPLE_ID != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dmg_dir="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+          dmg="$(ls "$dmg_dir"/*.dmg 2>/dev/null | head -1)"
+          if [ -z "$dmg" ]; then echo "::error::no .dmg found under $dmg_dir"; exit 1; fi
+          echo "Notarizing $dmg ..."
+          xcrun notarytool submit "$dmg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          gh release upload "${RELEASE_TAG}" "$dmg" --repo "${{ github.repository }}" --clobber
+          echo "Notarized + stapled + re-uploaded $dmg"
 
       # ── Human-download .zip of the macOS app ──────────────────────────────
       - name: Zip the macOS .app for direct download
