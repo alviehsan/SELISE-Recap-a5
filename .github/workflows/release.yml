@@ -220,21 +220,16 @@ jobs:
           gh release upload "${RELEASE_TAG}" "$dmg" --repo "${{ github.repository }}" --clobber
           echo "Notarized + stapled + re-uploaded $dmg"
 
-      # ── Human-download .zip of the macOS app ──────────────────────────────
-      - name: Zip the macOS .app for direct download
-        if: runner.os == 'macOS'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          app_dir="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
-          app="$(ls -d "$app_dir"/*.app 2>/dev/null | head -1)"
-          if [ -z "$app" ]; then echo "::error::no .app found under $app_dir"; exit 1; fi
-          ver="${RELEASE_TAG#v}"
-          case "${{ matrix.target }}" in aarch64*) arch=aarch64 ;; *) arch=x64 ;; esac
-          zip="SELISE.Recap.a5_${ver}_${arch}.zip"
-          ditto -c -k --keepParent "$app" "$zip"
-          gh release upload "${RELEASE_TAG}" "$zip" --repo "${{ github.repository }}" --clobber
-          echo "Uploaded $zip"
+      # macOS ships the .dmg ONLY. A human-download .zip of the raw .app used to
+      # be published here as a Gatekeeper workaround, back when builds were
+      # self-signed and unnotarized and the .dmg was rejected as "damaged". Builds
+      # are now signed with a Developer ID and notarized+stapled (see the step
+      # above), so the .dmg opens normally and is what Mac users expect. Shipping
+      # a bare .app in a zip alongside it only encouraged running the app straight
+      # out of ~/Downloads, which breaks updates and macOS permission prompts.
+      #
+      # NOTE: the updater artifacts (*.app.tar.gz + .sig) are produced by
+      # tauri-action, NOT by this removed step — auto-update is unaffected.
 
       # ── Human-download .zip of the Windows installer ──────────────────────
       - name: Zip the Windows installer for direct download
